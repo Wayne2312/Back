@@ -14,18 +14,14 @@ from config import Config
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
-# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
 
-# Initialize Flask app
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Check for FRONTEND_URL
 frontend_url = os.getenv('FRONTEND_URL', 'https://front-lovat-eight.vercel.app')
 if not frontend_url:
     logger.error("FRONTEND_URL environment variable is not set")
@@ -35,7 +31,6 @@ CORS(app, resources={r"/api/*": {"origins": frontend_url}}, supports_credentials
 db.init_app(app)
 migrate = Migrate(app, db)
 
-# JWT middleware
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -65,7 +60,6 @@ def token_required(f):
         return f(user, *args, **kwargs)
     return decorated
 
-# Register endpoint
 @app.route("/api/register", methods=["POST", "OPTIONS"])
 def register():
     if request.method == "OPTIONS":
@@ -101,7 +95,6 @@ def register():
         db.session.rollback()
         return jsonify({"message": "Failed to register user"}), 500
 
-# Login endpoint
 @app.route("/api/login", methods=["POST", "OPTIONS"])
 def login():
     if request.method == "OPTIONS":
@@ -118,7 +111,6 @@ def login():
     logger.info(f"User logged in: {user.username}")
     return jsonify({"token": token, "username": user.username, "email": user.email}), 200
 
-# Generate JWT
 def generate_token(user_id, email):
     payload = {
         "user_id": user_id,
@@ -130,7 +122,6 @@ def generate_token(user_id, email):
     logger.debug(f"Generated token for user_id {user_id}: {token}")
     return token
 
-# Habit CRUD endpoints
 @app.route("/api/habits", methods=["GET", "POST", "OPTIONS"])
 @token_required
 def habits(user):
@@ -173,7 +164,6 @@ def habits(user):
             db.session.rollback()
             return jsonify({"message": "Failed to create habit"}), 500
 
-# Other endpoints (unchanged from provided app.py)
 @app.route("/api/habits/<int:id>", methods=["PUT", "DELETE", "OPTIONS"])
 @token_required
 def habit(user, id):
