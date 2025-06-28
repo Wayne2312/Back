@@ -23,4 +23,4 @@ COPY . .
 EXPOSE $PORT
 
 # Command to run the app with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
