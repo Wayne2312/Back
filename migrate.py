@@ -1,4 +1,3 @@
-import logging
 from flask import Flask
 from flask_migrate import Migrate, upgrade
 from models import db
