@@ -23,7 +23,7 @@ load_dotenv()
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app, resources={r"/*": {
-    "origins": os.getenv("FRONTEND_URL", "http://localhost:5173"),
+    "origins": os.getenv("FRONTEND_URL", "https://aquamarine-bavarois-83a8b1.netlify.app"),
     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization"]
 }})
