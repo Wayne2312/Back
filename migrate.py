@@ -7,18 +7,18 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 
-  # Configure logging
+# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-  # Test database connection
+# Test database connection
 try:
     engine = create_engine(os.getenv('DATABASE_URL'))
     with engine.connect() as conn:
-          logger.info("Database connection successful")
+        logger.info("Database connection successful")
 except OperationalError as e:
-      logger.error(f"Database connection failed: {e}")
-      exit(1)
+    logger.error(f"Database connection failed: {e}")
+    exit(1)
 
 app = Flask(__name__)
 app.config.from_object(Config)
