@@ -7,11 +7,9 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 
-# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Test database connection
 try:
     engine = create_engine(os.getenv('DATABASE_URL'))
     with engine.connect() as conn:
@@ -27,7 +25,7 @@ migrate = Migrate(app, db)
 
 with app.app_context():
     try:
-        upgrade()  # Apply migrations
+        upgrade()
         logger.info("Database migrations applied successfully")
     except Exception as e:
         logger.error(f"Failed to apply migrations: {e}")
