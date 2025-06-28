@@ -280,7 +280,7 @@ def get_analysis(user):
                 completion_rate = actual_weeks / expected_weeks if expected_weeks > 0 else 0
 
             activities = Activity.query.filter(
-                Activity.habit_id == habit.id,
+                Activity.habit_id = habit.id,
                 Activity.completed_at >= start_date,
                 Activity.completed_at <= end_date
             ).all()
