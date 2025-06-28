@@ -105,6 +105,22 @@ def generate_token(user_id, email):
     token = jwt.encode(payload, app.config["JWT_SECRET_KEY"], algorithm="HS256")
     return token
 
+# Calculate streak
+def calculate_streak(habit):
+    activities = Activity.query.filter_by(habit_id=habit.id).order_by(Activity.completed_at.desc()).all()
+    if not activities:
+        return 0
+    streak = 0
+    today = datetime.utcnow().date()
+    for i, activity in enumerate(activities):
+        activity_date = activity.completed_at.date()
+        if i == 0 and activity_date < today:
+            return streak
+        if i > 0 and (activities[i-1].completed_at.date() - activity_date).days > 1:
+            break
+        streak += 1
+    return streak
+
 # Habit CRUD endpoints
 @app.route("/api/habits", methods=["GET", "POST", "OPTIONS"])
 @token_required
@@ -155,10 +171,12 @@ def habit(user, id):
             logger.info(f"Habit {id} deleted successfully by user {user.id}")
             return jsonify({"message": "Habit deleted"}), 200
         except Exception as e:
-            logger.error(f"Error deleting habit {id}: {str(e)}")
-            db.session.rollback()
+            logger.error(f"Failed to delete habit: {str(e)}")
             return jsonify({"message": f"Failed to delete habit: {str(e)}"}), 500
- # Activity logging
+
+    return jsonify({"message": "Activity logged", "streak": calculate_streak(habit)}), 201
+
+# Activity logging
 @app.route("/api/habits/<int:id>/log", methods=["POST", "OPTIONS"])
 @token_required
 def log_activity(user, id):
@@ -171,45 +189,32 @@ def log_activity(user, id):
     db.session.add(new_activity)
     db.session.commit()
     return jsonify({"message": "Activity logged", "streak": calculate_streak(habit)}), 201
-  # Get activity history
-@app.route("/api/habits/<int:id>/history", methods=["GET", "OPTIONS"])
-@token_required
-def get_history(user, id):
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    habit = Habit.query.get_or_404(id)
-    if habit.user_id != user.id:
-        return jsonify({"message": "Unauthorized"}), 403
-    activities = Activity.query.filter_by(habit_id=id).order_by(Activity.completed_at.desc()).all()
-    return jsonify([{
-        "id": activity.id,
-        "completed_at": activity.completed_at.isoformat()
-    } for activity in activities]), 200
- # Analysis endpoint
+
+# Get activity history and analysis
 @app.route("/api/habits/analysis", methods=["GET", "OPTIONS"])
 @token_required
-def get_analysis(user):
+def habits_analysis(user):
     if request.method == "OPTIONS":
         return jsonify({}), 200
     try:
         # Fetch habits
         habits = Habit.query.filter_by(user_id=user.id).all()
         habit_data = []
-         # Time range for trends (last 30 days)
+        # Time range for trends (last 30 days)
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=30)
-         # Prepare trend labels (daily for simplicity)
+        # Prepare trend labels (daily for simplicity)
         trend_labels = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(31)]
         trend_data = {habit.id: [0] * 31 for habit in habits}
         for habit in habits:
-             # Total activities
+            # Total activities
             total_activities = Activity.query.filter_by(habit_id=habit.id).count()
 
-              # Completion rate
+            # Completion rate
             if habit.frequency == "daily":
                 expected_days = 30
                 actual_days = db.session.query(
-                     func.count(func.distinct(func.date(Activity.completed_at))
+                    func.count(func.distinct(func.date(Activity.completed_at)))
                 ).filter(
                     Activity.habit_id == habit.id,
                     Activity.completed_at >= start_date,
@@ -226,7 +231,7 @@ def get_analysis(user):
                     Activity.completed_at <= end_date
                 ).scalar() or 0
                 completion_rate = actual_weeks / expected_weeks if expected_weeks > 0 else 0
-             # Trend data
+            # Trend data
             activities = Activity.query.filter(
                 Activity.habit_id == habit.id,
                 Activity.completed_at >= start_date,
@@ -236,7 +241,7 @@ def get_analysis(user):
                 day_index = (activity.completed_at.date() - start_date.date()).days
                 if 0 <= day_index < 31:
                     trend_data[habit.id][day_index] += 1
-                habit_data.append({
+            habit_data.append({
                 "id": habit.id,
                 "name": habit.name,
                 "frequency": habit.frequency,
@@ -254,7 +259,8 @@ def get_analysis(user):
     except Exception as e:
         logger.error(f"Error fetching analysis: {str(e)}")
         return jsonify({"message": f"Failed to fetch analysis: {str(e)}"}), 500
- # Calculate streak
+
+# Calculate streak
 def calculate_streak(habit):
     activities = Activity.query.filter_by(habit_id=habit.id).order_by(Activity.completed_at.desc()).all()
     if not activities:
@@ -268,6 +274,6 @@ def calculate_streak(habit):
         if i > 0 and (activities[i-1].completed_at.date() - activity_date).days > 1:
             break
         streak += 1
-   return streak
+    return streak
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
