@@ -22,11 +22,7 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 app.config.from_object(Config)
-CORS(app, resources={r"/*": {
-    "origins": os.getenv("FRONTEND_URL", "https://front-lovat-eight.vercel.app/"),
-    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization"]
-}})
+CORS(app, resources={r"/api/*": {"origins": app.config['FRONTEND_URL']}}, supports_credentials=True)
 db.init_app(app)
 
 # Create database tables
