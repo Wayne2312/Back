@@ -29,7 +29,7 @@ if not frontend_url:
 
 CORS(app, resources={
     r"/api/*": {
-        "origins": [frontend_url, "http://localhost:3000"],  # Add local dev URL
+        "origins": ["https://front-lovat-eight.vercel.app", "http://localhost:3000"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Authorization", "Content-Type"],
         "supports_credentials": True,
