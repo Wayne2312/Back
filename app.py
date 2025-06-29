@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from flask_migrate import Migrate
+from flask_restx import Api, Resource, fields
 from dotenv import load_dotenv
 import jwt
 import bcrypt
@@ -22,6 +23,18 @@ load_dotenv()
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Initialize Flask-RESTX
+api = Api(app, 
+    version='1.0', 
+    title='Habit Tracker API',
+    description='API for managing user habits and tracking activities',
+    doc='/api/docs/'
+)
+
+# Define namespaces
+auth_ns = api.namespace('auth', description='Authentication operations')
+habits_ns = api.namespace('habits', description='Habit management operations')
+
 frontend_url = os.getenv('FRONTEND_URL', 'https://front-lovat-eight.vercel.app')
 if not frontend_url:
     logger.error("FRONTEND_URL environment variable is not set")
@@ -37,6 +50,51 @@ CORS(app, resources={
     }
 })
 
+# Model definitions for Swagger documentation
+register_model = api.model('Register', {
+    'username': fields.String(required=True, description='User username'),
+    'email': fields.String(required=True, description='User email'),
+    'password': fields.String(required=True, description='User password')
+})
+
+login_model = api.model('Login', {
+    'identifier': fields.String(required=True, description='Username or email'),
+    'password': fields.String(required=True, description='User password')
+})
+
+habit_model = api.model('Habit', {
+    'name': fields.String(required=True, description='Habit name'),
+    'description': fields.String(description='Habit description'),
+    'frequency': fields.String(required=True, description='Habit frequency (daily or weekly)')
+})
+
+activity_model = api.model('Activity', {
+    'id': fields.Integer(readonly=True, description='Activity ID'),
+    'completed_at': fields.DateTime(readonly=True, description='Activity completion timestamp')
+})
+
+habit_response_model = api.model('HabitResponse', {
+    'id': fields.Integer(readonly=True, description='Habit ID'),
+    'name': fields.String(description='Habit name'),
+    'description': fields.String(description='Habit description'),
+    'frequency': fields.String(description='Habit frequency'),
+    'streak': fields.Integer(description='Current streak')
+})
+
+analysis_model = api.model('Analysis', {
+    'habits': fields.List(fields.Nested(api.model('HabitAnalysis', {
+        'id': fields.Integer(description='Habit ID'),
+        'name': fields.String(description='Habit name'),
+        'frequency': fields.String(description='Habit frequency'),
+        'total_activities': fields.Integer(description='Total activities'),
+        'completion_rate': fields.Float(description='Completion rate')
+    }))),
+    'trends': fields.Nested(api.model('Trends', {
+        'labels': fields.List(fields.String, description='Date labels for trend data'),
+        'data': fields.Raw(description='Trend data for each habit')
+    }))
+})
+
 @app.before_request
 def handle_options():
     if request.method == "OPTIONS":
@@ -45,6 +103,7 @@ def handle_options():
         response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type")
         return response
+
 db.init_app(app)
 migrate = Migrate(app, db)
 
@@ -77,56 +136,67 @@ def token_required(f):
         return f(user, *args, **kwargs)
     return decorated
 
-@app.route("/api/register", methods=["POST", "OPTIONS"])
-def register():
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    data = request.get_json()
-    logger.debug(f"Register payload: {data}")
-    username = data.get("username")
-    email = data.get("email")
-    password = data.get("password")
-    if not username or not email or not password:
-        logger.error("Missing username, email, or password")
-        return jsonify({"message": "Username, email, and password required"}), 400
-    if User.query.filter_by(username=username).first():
-        logger.error(f"Username already exists: {username}")
-        return jsonify({"message": "Username already exists"}), 400
-    if User.query.filter_by(email=email).first():
-        logger.error(f"Email already exists: {email}")
-        return jsonify({"message": "Email already exists"}), 400
-    try:
-        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
-        new_user = User(
-            username=username,
-            email=email,
-            password=hashed_password.decode("utf-8")
-        )
-        db.session.add(new_user)
-        db.session.commit()
-        token = generate_token(new_user.id, new_user.email)
-        logger.info(f"User registered: {username}")
-        return jsonify({"message": "User registered", "token": token}), 201
-    except SQLAlchemyError as e:
-        logger.error(f"Database error during registration: {str(e)}")
-        db.session.rollback()
-        return jsonify({"message": "Failed to register user"}), 500
+@auth_ns.route('/register')
+class Register(Resource):
+    @auth_ns.doc('register_user')
+    @auth_ns.expect(register_model)
+    @auth_ns.response(201, 'User registered successfully')
+    @auth_ns.response(400, 'Invalid input')
+    @auth_ns.response(500, 'Server error')
+    def post(self):
+        if request.method == "OPTIONS":
+            return jsonify({}), 200
+        data = request.get_json()
+        logger.debug(f"Register payload: {data}")
+        username = data.get("username")
+        email = data.get("email")
+        password = data.get("password")
+        if not username or not email or not password:
+            logger.error("Missing username, email, or password")
+            return {"message": "Username, email, and password required"}, 400
+        if User.query.filter_by(username=username).first():
+            logger.error(f"Username already exists: {username}")
+            return {"message": "Username already exists"}, 400
+        if User.query.filter_by(email=email).first():
+            logger.error(f"Email already exists: {email}")
+            return {"message": "Email already exists"}, 400
+        try:
+            hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+            new_user = User(
+                username=username,
+                email=email,
+                password=hashed_password
+            )
+            db.session.add(new_user)
+            db.session.commit()
+            token = generate_token(new_user.id, new_user.email)
+            logger.info(f"User registered: {username}")
+            return {"message": "User registered", "token": token}, 201
+        except SQLAlchemyError as e:
+            logger.error(f"Database error during registration: {str(e)}")
+            db.session.rollback()
+            return {"message": "Failed to register user"}, 500
 
-@app.route("/api/login", methods=["POST", "OPTIONS"])
-def login():
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    data = request.get_json()
-    logger.debug(f"Login payload: {data}")
-    identifier = data.get("identifier")
-    password = data.get("password")
-    user = User.query.filter((User.username == identifier) | (User.email == identifier)).first()
-    if not user or not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
-        logger.error("Invalid credentials")
-        return jsonify({"message": "Invalid credentials"}), 401
-    token = generate_token(user.id, user.email)
-    logger.info(f"User logged in: {user.username}")
-    return jsonify({"token": token, "username": user.username, "email": user.email}), 200
+@auth_ns.route('/login')
+class Login(Resource):
+    @auth_ns.doc('login_user')
+    @auth_ns.expect(login_model)
+    @auth_ns.response(200, 'Login successful')
+    @auth_ns.response(401, 'Invalid credentials')
+    def post(self):
+        if request.method == "OPTIONS":
+            return jsonify({}), 200
+        data = request.get_json()
+        logger.debug(f"Login payload: {data}")
+        identifier = data.get("identifier")
+        password = data.get("password")
+        user = User.query.filter((User.username == identifier) | (User.email == identifier)).first()
+        if not user or not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
+            logger.error("Invalid credentials")
+            return {"message": "Invalid credentials"}, 401
+        token = generate_token(user.id, user.email)
+        logger.info(f"User logged in: {user.username}")
+        return {"token": token, "username": user.username, "email": user.email}, 200
 
 def generate_token(user_id, email):
     payload = {
@@ -139,26 +209,37 @@ def generate_token(user_id, email):
     logger.debug(f"Generated token for user_id {user_id}: {token}")
     return token
 
-@app.route("/api/habits", methods=["GET", "POST", "OPTIONS"])
-@token_required
-def habits(user):
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    if request.method == "GET":
+@habits_ns.route('')
+class Habits(Resource):
+    @habits_ns.doc('list_create_habits')
+    @habits_ns.response(200, 'Success', [habit_response_model])
+    @habits_ns.response(401, 'Unauthorized')
+    @habits_ns.response(500, 'Server error')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def get(self, user):
         try:
             habits = Habit.query.filter_by(user_id=user.id).all()
             logger.debug(f"Fetched {len(habits)} habits for user {user.username}")
-            return jsonify([{
+            return [{
                 "id": habit.id,
                 "name": habit.name,
                 "description": habit.description,
                 "frequency": habit.frequency,
                 "streak": calculate_streak(habit)
-            } for habit in habits]), 200
+            } for habit in habits], 200
         except SQLAlchemyError as e:
             logger.error(f"Database error fetching habits: {str(e)}")
-            return jsonify({"message": "Failed to fetch habits"}), 500
-    if request.method == "POST":
+            return {"message": "Failed to fetch habits"}, 500
+
+    @habits_ns.doc('create_habit')
+    @habits_ns.expect(habit_model)
+    @habits_ns.response(201, 'Habit created')
+    @habits_ns.response(400, 'Invalid input')
+    @habits_ns.response(401, 'Unauthorized')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def post(self, user):
         data = request.get_json()
         logger.debug(f"Create habit payload: {data}")
         name = data.get("name")
@@ -166,165 +247,192 @@ def habits(user):
         frequency = data.get("frequency")
         if not name or not frequency:
             logger.error("Missing name or frequency")
-            return jsonify({"message": "Name and frequency required"}), 400
+            return {"message": "Name and frequency required"}, 400
         if frequency.lower() not in ["daily", "weekly"]:
             logger.error(f"Invalid frequency: {frequency}")
-            return jsonify({"message": "Frequency must be 'daily' or 'weekly'"}), 400
+            return {"message": "Frequency must be 'daily' or 'weekly'"}, 400
         try:
             new_habit = Habit(name=name, description=description, frequency=frequency.lower(), user_id=user.id)
             db.session.add(new_habit)
             db.session.commit()
             logger.info(f"Habit created: {name} for user {user.username}")
-            return jsonify({"message": "Habit created", "id": new_habit.id}), 201
+            return {"message": "Habit created", "id": new_habit.id}, 201
         except SQLAlchemyError as e:
             logger.error(f"Database error creating habit: {str(e)}")
             db.session.rollback()
-            return jsonify({"message": "Failed to create habit"}), 500
+            return {"message": "Failed to create habit"}, 500
 
-@app.route("/api/habits/<int:id>", methods=["PUT", "DELETE", "OPTIONS"])
-@token_required
-def habit(user, id):
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    habit = Habit.query.get_or_404(id)
-    if habit.user_id != user.id:
-        logger.error(f"Unauthorized access to habit {id} by user {user.id}")
-        return jsonify({"message": "Unauthorized"}), 403
-    if request.method == "PUT":
+@habits_ns.route('/<int:id>')
+class Habit(Resource):
+    @habits_ns.doc('update_delete_habit')
+    @habits_ns.expect(habit_model)
+    @habits_ns.response(200, 'Habit updated')
+    @habits_ns.response(403, 'Unauthorized')
+    @habits_ns.response(404, 'Habit not found')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def put(self, user, id):
+        habit = Habit.query.get_or_404(id)
+        if habit.user_id != user.id:
+            logger.error(f"Unauthorized access to habit {id} by user {user.id}")
+            return {"message": "Unauthorized"}, 403
         data = request.get_json()
         logger.debug(f"Update habit {id} payload: {data}")
         frequency = data.get("frequency", habit.frequency)
         if frequency.lower() not in ["daily", "weekly"]:
             logger.error(f"Invalid frequency: {frequency}")
-            return jsonify({"message": "Frequency must be 'daily' or 'weekly'"}), 400
+            return {"message": "Frequency must be 'daily' or 'weekly'"}, 400
         try:
             habit.name = data.get("name", habit.name)
             habit.description = data.get("description", habit.description)
             habit.frequency = frequency.lower()
             db.session.commit()
             logger.info(f"Habit {id} updated for user {user.username}")
-            return jsonify({"message": "Habit updated"}), 200
+            return {"message": "Habit updated"}, 200
         except SQLAlchemyError as e:
             logger.error(f"Database error updating habit: {str(e)}")
             db.session.rollback()
-            return jsonify({"message": "Failed to update habit"}), 500
-    if request.method == "DELETE":
+            return {"message": "Failed to update habit"}, 500
+
+    @habits_ns madrugada_doc('delete_habit')
+    @habits_ns.response(200, 'Habit deleted')
+    @habits_ns.response(403, 'Unauthorized')
+    @habits_ns.response(404, 'Habit not found')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def delete(self, user, id):
+        habit = Habit.query.get_or_404(id)
+        if habit.user_id != user.id:
+            logger.error(f"Unauthorized access to habit {id} by user {user.id}")
+            return {"message": "Unauthorized"}, 403
         try:
             logger.info(f"Deleting habit {id} for user {user.id}")
             db.session.delete(habit)
             db.session.commit()
             logger.info(f"Habit {id} deleted successfully by user {user.id}")
-            return jsonify({"message": "Habit deleted"}), 200
+            return {"message": "Habit deleted"}, 200
         except SQLAlchemyError as e:
             logger.error(f"Error deleting habit {id}: {str(e)}")
             db.session.rollback()
-            return jsonify({"message": "Failed to delete habit"}), 500
+            return {"message": "Failed to delete habit"}, 500
 
-@app.route("/api/habits/<int:id>/log", methods=["POST", "OPTIONS"])
-@token_required
-def log_activity(user, id):
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    habit = Habit.query.get_or_404(id)
-    if habit.user_id != user.id:
-        logger.error(f"Unauthorized access to habit {id} by user {user.id}")
-        return jsonify({"message": "Unauthorized"}), 403
-    try:
-        new_activity = Activity(habit_id=id, user_id=user.id, completed_at=datetime.utcnow())
-        db.session.add(new_activity)
-        db.session.commit()
-        logger.info(f"Activity logged for habit {id} by user {user.username}")
-        return jsonify({"message": "Activity logged", "streak": calculate_streak(habit)}), 201
-    except SQLAlchemyError as e:
-        logger.error(f"Database error logging activity: {str(e)}")
-        db.session.rollback()
-        return jsonify({"message": "Failed to log activity"}), 500
+@habits_ns.route('/<int:id>/log')
+class LogActivity(Resource):
+    @habits_ns.doc('log_activity')
+    @habits_ns.response(201, 'Activity logged')
+    @habits_ns.response(403, 'Unauthorized')
+    @habits_ns.response(404, 'Habit not found')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def post(self, user, id):
+        habit = Habit.query.get_or_404(id)
+        if habit.user_id != user.id:
+            logger.error(f"Unauthorized access to habit {id} by user {user.id}")
+            return {"message": "Unauthorized"}, 403
+        try:
+            new_activity = Activity(habit_id=id, user_id=user.id, completed_at=datetime.utcnow())
+            db.session.add(new_activity)
+            db.session.commit()
+            logger.info(f"Activity logged for habit {id} by user {user.username}")
+            return {"message": "Activity logged", "streak": calculate_streak(habit)}, 201
+        except SQLAlchemyError as e:
+            logger.error(f"Database error logging activity: {str(e)}")
+            db.session.rollback()
+            return {"message": "Failed to log activity"}, 500
 
-@app.route("/api/habits/<int:id>/history", methods=["GET", "OPTIONS"])
-@token_required
-def get_history(user, id):
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    habit = Habit.query.get_or_404(id)
-    if habit.user_id != user.id:
-        logger.error(f"Unauthorized access to habit {id} by user {user.id}")
-        return jsonify({"message": "Unauthorized"}), 403
-    try:
-        activities = Activity.query.filter_by(habit_id=id).order_by(Activity.completed_at.desc()).all()
-        logger.debug(f"Fetched history for habit {id}: {len(activities)} activities")
-        return jsonify([{
-            "id": activity.id,
-            "completed_at": activity.completed_at.isoformat()
-        } for activity in activities]), 200
-    except SQLAlchemyError as e:
-        logger.error(f"Database error fetching history: {str(e)}")
-        return jsonify({"message": "Failed to fetch history"}), 500
+@habits_ns.route('/<int:id>/history')
+class HabitHistory(Resource):
+    @habits_ns.doc('get_habit_history')
+    @habits_ns.response(200, 'Success', [activity_model])
+    @habits_ns.response(403, 'Unauthorized')
+    @habits_ns.response(404, 'Habit not found')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def get(self, user, id):
+        habit = Habit.query.get_or_404(id)
+        if habit.user_id != user.id:
+            logger.error(f"Unauthorized access to habit {id} by user {user.id}")
+            return {"message": "Unauthorized"}, 403
+        try:
+            activities = Activity.query.filter_by(habit_id=id).order_by(Activity.completed_at.desc()).all()
+            logger.debug(f"Fetched history for habit {id}: {len(activities)} activities")
+            return [{
+                "id": activity.id,
+                "completed_at": activity.completed_at.isoformat()
+            } for activity in activities], 200
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching history: {str(e)}")
+            return {"message": "Failed to fetch history"}, 500
 
-@app.route("/api/habits/analysis", methods=["GET", "OPTIONS"])
-@token_required
-def get_analysis(user):
-    if request.method == "OPTIONS":
-        return jsonify({}), 200
-    try:
-        habits = Habit.query.filter_by(user_id=user.id).all()
-        habit_data = []
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=30)
-        trend_labels = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(31)]
-        trend_data = {habit.id: [0] * 31 for habit in habits}
+@habits_ns.route('/analysis')
+class HabitsAnalysis(Resource):
+    @habits_ns.doc('get_habits_analysis')
+    @habits_ns.response(200, 'Success', analysis_model)
+    @habits_ns.response(401, 'Unauthorized')
+    @habits_ns.response(500, 'Server error')
+    @habits_ns.expect(auth_ns.parser().add_argument('Authorization', location='headers', required=True))
+    @token_required
+    def get(self, user):
+        try:
+            habits = Habit.query.filter_by(user_id=user.id).all()
+            habit_data = []
+            end_date = datetime.utcnow()
+            start_date = end_date - timedelta(days=30)
+            trend_labels = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(31)]
+            trend_data = {habit.id: [0] * 31 for habit in habits}
 
-        for habit in habits:
-            total_activities = Activity.query.filter_by(habit_id=habit.id).count()
-            if habit.frequency == "daily":
-                expected_days = 30
-                actual_days = db.session.query(
-                    func.count(func.distinct(func.date(Activity.completed_at)))
-                ).filter(
+            for habit in habits:
+                total_activities = Activity.query.filter_by(habit_id=habit.id).count()
+                if habit.frequency == "daily":
+                    expected_days = 30
+                    actual_days = db.session.query(
+                        func.count(func.distinct(func.date(Activity.completed_at)))
+                    ).filter(
+                        Activity.habit_id == habit.id,
+                        Activity.completed_at >= start_date,
+                        Activity.completed_at <= end_date
+                    ).scalar() or 0
+                    completion_rate = actual_days / expected_days if expected_days > 0 else 0
+                else:
+                    expected_weeks = 4
+                    actual_weeks = db.session.query(
+                        func.count(func.distinct(func.extract("week", Activity.completed_at)))
+                    ).filter(
+                        Activity.habit_id == habit.id,
+                        Activity.completed_at >= start_date,
+                        Activity.completed_at <= end_date
+                    ).scalar() or 0
+                    completion_rate = actual_weeks / expected_weeks if expected_weeks > 0 else 0
+
+                activities = Activity.query.filter(
                     Activity.habit_id == habit.id,
                     Activity.completed_at >= start_date,
                     Activity.completed_at <= end_date
-                ).scalar() or 0
-                completion_rate = actual_days / expected_days if expected_days > 0 else 0
-            else:
-                expected_weeks = 4
-                actual_weeks = db.session.query(
-                    func.count(func.distinct(func.extract("week", Activity.completed_at)))
-                ).filter(
-                    Activity.habit_id == habit.id,
-                    Activity.completed_at >= start_date,
-                    Activity.completed_at <= end_date
-                ).scalar() or 0
-                completion_rate = actual_weeks / expected_weeks if expected_weeks > 0 else 0
+                ).all()
+                for activity in activities:
+                    day_index = (activity.completed_at.date() - start_date.date()).days
+                    if 0 <= day_index < 31:
+                        trend_data[habit.id][day_index] += 1
 
-            activities = Activity.query.filter(
-                Activity.habit_id == habit.id,
-                Activity.completed_at >= start_date,
-                Activity.completed_at <= end_date
-            ).all()
-            for activity in activities:
-                day_index = (activity.completed_at.date() - start_date.date()).days
-                if 0 <= day_index < 31:
-                    trend_data[habit.id][day_index] += 1
+                habit_data.append({
+                    "id": habit.id,
+                    "name": habit.name,
+                    "frequency": habit.frequency,
+                    "total_activities": total_activities,
+                    "completion_rate": completion_rate
+                })
 
-            habit_data.append({
-                "id": habit.id,
-                "name": habit.name,
-                "frequency": habit.frequency,
-                "total_activities": total_activities,
-                "completion_rate": completion_rate
-            })
-
-        logger.debug(f"Analysis fetched for user {user.username}: {len(habit_data)} habits")
-        return jsonify({
-            "habits": habit_data,
-            "trends": {
-                "labels": trend_labels,
-                "data": trend_data
-            }
-        }), 200
-    except SQLAlchemyError as e:
-        logger.error(f"Database error fetching analysis: {str(e)}")
-        return jsonify({"message": "Failed to fetch analysis"}), 500
+            logger.debug(f"Analysis fetched for user {user.username}: {len(habit_data)} habits")
+            return {
+                "habits": habit_data,
+                "trends": {
+                    "labels": trend_labels,
+                    "data": trend_data
+                }
+            }, 200
+        except SQLAlchemyError as e:
+            logger.error(f"Database error fetching analysis: {str(e)}")
+            return {"message": "Failed to fetch analysis"}, 500
 
 def calculate_streak(habit):
     try:
