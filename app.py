@@ -24,11 +24,21 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 # Initialize Flask-RESTX
-api = Api(app, 
-    version='1.0', 
+api = Api(
+    app,
+    version='1.0',
     title='Habit Tracker API',
     description='API for managing user habits and tracking activities',
-    doc='/api/docs/'
+    doc='/api/docs/',
+    authorizations={
+        'Bearer Auth': {
+            'type': 'apiKey',
+            'in': 'header',
+            'name': 'Authorization',
+            'description': 'Type "Bearer <jwt-token>"'
+        }
+    },
+    security='Bearer Auth'
 )
 
 # Define namespaces
@@ -294,7 +304,7 @@ class Habit(Resource):
             db.session.rollback()
             return {"message": "Failed to update habit"}, 500
 
-    @habits_ns madrugada_doc('delete_habit')
+    @habits_ns.doc('delete_habit')
     @habits_ns.response(200, 'Habit deleted')
     @habits_ns.response(403, 'Unauthorized')
     @habits_ns.response(404, 'Habit not found')
