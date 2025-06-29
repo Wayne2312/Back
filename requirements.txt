@@ -8,3 +8,5 @@ bcrypt==4.2.0
 psycopg==3.2.1
 gunicorn==23.0.0
 flask_restx
+email_validator
+flask_limiter
