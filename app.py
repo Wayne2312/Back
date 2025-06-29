@@ -27,7 +27,15 @@ if not frontend_url:
     logger.error("FRONTEND_URL environment variable is not set")
     raise ValueError("FRONTEND_URL environment variable is required")
 
-CORS(app, resources={r"/api/*": {"origins": frontend_url}}, supports_credentials=True)
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [frontend_url, "http://localhost:3000"],  # Add local dev URL
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type"],
+        "supports_credentials": True,
+        "expose_headers": ["Authorization"]
+    }
+})
 db.init_app(app)
 migrate = Migrate(app, db)
 
@@ -45,7 +53,7 @@ def token_required(f):
             logger.error("Invalid Authorization header format")
             return jsonify({"message": "Token required (Bearer expected)"}), 401
         try:
-            payload = jwt.decode(token, app.config["JWT_SECRET_KEY"], algorithms=["HS256"])
+            payload = jwt.decode(token, app.config["JWT_SECRET_KEY"], algorithms=["HS256"], options={"require": ["exp", "iat"]})
             user = User.query.get(payload["user_id"])
             if not user:
                 logger.error("User not found for token")
@@ -79,7 +87,7 @@ def register():
         logger.error(f"Email already exists: {email}")
         return jsonify({"message": "Email already exists"}), 400
     try:
-        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
         new_user = User(
             username=username,
             email=email,
