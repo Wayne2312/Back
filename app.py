@@ -36,6 +36,15 @@ CORS(app, resources={
         "expose_headers": ["Authorization"]
     }
 })
+
+@app.before_request
+def handle_options():
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "preflight accepted"})
+        response.headers.add("Access-Control-Allow-Origin", "https://front-lovat-eight.vercel.app")
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        return response
 db.init_app(app)
 migrate = Migrate(app, db)
 
