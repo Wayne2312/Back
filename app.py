@@ -15,8 +15,7 @@ from models import db, User, Habit, Activity
 from config import Config
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+
 
 logging.basicConfig(level=logging.DEBUG)
 load_dotenv()
@@ -238,7 +237,6 @@ class Register(Resource):
 
 @auth_ns.route('/login')
 class Login(Resource):
-    @limiter.limit("5 per minute")
     @auth_ns.doc('login_user')
     @auth_ns.expect(login_model)
     @auth_ns.response(200, 'Login successful')
